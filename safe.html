@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self';">
+  <title>Browser Security Checker – by Dejvid Udric</title>
+  <link rel="icon" href="/favicon.ico" aria-label="Website-Icon">
+  <style>
+    /* Lokale Inter‑Variable‑Font → /fonts/Inter-VariableFont_slnt,wght.woff2 */
+    @font-face {
+      font-family: "Inter";
+      font-style: normal;
+      font-weight: 100 900;
+      font-display: swap;
+      src: url("fonts/Inter-VariableFont_slnt,wght.woff2") format("woff2");
+    }
+
+    :root {
+      --primary: #0f172a;
+      --accent:  #38bdf8;
+      --bg:      #0e1116;
+      --panel:   #1e293b;
+      --text:    #e2e8f0;
+      --muted:   #94a3b8;
+      --ok:      #10b981;
+      --warn:    #f59e0b;
+      --fail:    #ef4444;
+      --radius:  .75rem;
+      --space-sm:.5rem;
+      --space-md:1rem;
+    }
+
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:"Inter",sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column;min-height:100vh;-webkit-font-smoothing:antialiased}
+    header{background:linear-gradient(90deg,var(--primary),var(--accent));padding:var(--space-md);text-align:center}
+    header h1{font-size:1.7rem;font-weight:700;letter-spacing:.02em}
+    main{flex:1;max-width:900px;margin:0 auto;padding:var(--space-md)}
+    #score{text-align:center;font-size:1.5rem;font-weight:600;margin:var(--space-md) 0}
+    .progress{display:flex;height:1rem;border-radius:var(--radius);overflow:hidden;margin-bottom:var(--space-md);background:#334155}
+    .bar{height:100%;transition:width .3s ease}
+    .bar.ok{background:var(--ok)}.bar.warn{background:var(--warn)}.bar.fail{background:var(--fail)}
+    .checks{list-style:none;border:1px solid #334155;border-radius:var(--radius);overflow:hidden}
+    .check{display:flex;align-items:flex-start;padding:var(--space-sm)var(--space-md);background:var(--panel)}
+    .check:nth-child(odd){background:#273549}
+    .icon{font-size:1.25rem;margin-right:var(--space-md);flex-shrink:0}
+    .label{flex:1;font-weight:500}
+    .sugg{margin-left:calc(1.25rem + var(--space-sm));font-size:.85rem;color:var(--muted);margin-top:.25rem}
+    .sugg ul{padding-left:1.1rem;list-style:disc}
+    footer{text-align:center;color:var(--muted);padding:var(--space-md) 0;font-size:.85rem}
+    a{color:var(--accent)}
+    a:focus{outline:2px solid var(--accent);outline-offset:2px}
+    @media(max-width:600px){main{padding:var(--space-sm)}.check{flex-direction:column}.sugg{margin-left:0}}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Browser Security Checker – Dejvid Udric</h1>
+  </header>
+
+  <main>
+    <div id="score" role="status" aria-live="polite">Prüfe Browser …</div>
+
+    <div id="progressbar" class="progress" role="progressbar" aria-label="Sicherheitsfortschritt" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div id="bar-ok"   class="bar ok"   style="width:0%"></div>
+      <div id="bar-warn" class="bar warn" style="width:0%"></div>
+      <div id="bar-fail" class="bar fail" style="width:0%"></div>
+    </div>
+
+    <ul id="results" class="checks" role="list" aria-label="Liste der Sicherheitsprüfungen"></ul>
+  </main>
+
+  <footer>&copy; 2025 Dejvid Udric – All rights reserved.</footer>
+
+  <script>
+    // Offline‑Versionstabellen
+    const LATEST={Chrome:'126',Edge:'126',Firefox:'128',Safari:'18',Chromium:'126'};
+    const UPDATE_LINKS={Chrome:'chrome://settings/help',Edge:'edge://settings/help',Firefox:'about:preferences',Safari:'https://support.apple.com/safari',Chromium:'chrome://settings/help'};
+
+    // UA‑Parser (Client‑Hints first)
+    function parseUA(){
+      const ch=navigator.userAgentData?.brands?.find(b=>/Chrome|Chromium|Edge|Firefox/i.test(b.brand));
+      if(ch) return {name:ch.brand.replace(/Google |Microsoft /,''),version:ch.version.split('.')[0]};
+      const ua=navigator.userAgent;
+      if(/Edg\/(\d+)/.test(ua)) return {name:'Edge',version:RegExp.$1};
+      if(/Chrome\/(\d+)/.test(ua)) return {name:'Chrome',version:RegExp.$1};
+      if(/Firefox\/(\d+)/.test(ua))return {name:'Firefox',version:RegExp.$1};
+      if(/Version\/(\d+).*Safari/.test(ua))return {name:'Safari',version:RegExp.$1};
+      if(/Chromium\/(\d+)/.test(ua))return {name:'Chromium',version:RegExp.$1};
+      return {name:'Unbekannt',version:'0'};
+    }
+    function parseOS(){const u=navigator.userAgent;if(/Windows NT 1[0-1]/.test(u))return 'Windows 10/11';if(/Mac OS X/.test(u))return 'macOS';if(/Android/.test(u))return 'Android';if(/iPhone|iPad/.test(u))return 'iOS';return 'Unbekanntes OS';}
+
+    // Sicherheitsrelevante Feature‑Checks
+    const FEATURES=[
+      ['Fetch API',          ()=>'fetch'in window,                          'Fetch‑Polyfill installieren.'],
+      ['Promise',            ()=>'Promise'in window,                       'Promise‑Polyfill installieren.'],
+      ['WebAssembly',        ()=>typeof WebAssembly==='object',            'Browser updaten – WebAssembly fehlt.'],
+      ['CSS Grid',           ()=>CSS.supports('display','grid'),           'Grid‑ oder Flexbox‑Polyfill nutzen.'],
+      ['Service Worker',     ()=>'serviceWorker'in navigator,             'HTTPS & SW registrieren.'],
+      ['Web Crypto API',     ()=>'crypto'in window&&!!crypto.subtle,       'HTTPS aktivieren.'],
+      ['Secure Context',     ()=>window.isSecureContext,                   'Seite über HTTPS laden.'],
+      ['WebAuthn',           ()=>'PublicKeyCredential'in window,           'WebAuthn / Passkeys aktivieren.'],
+      ['IndexedDB',          ()=>'indexedDB'in window,                     'indexeddbshim verwenden.'],
+      ['WebGL',              ()=>{try{return!!document.createElement('canvas').getContext('webgl')}catch{return false}}, 'Grafiktreiber/Browser updaten.']
+    ];
+
+    // DOM‑Refs
+    const scoreEl=document.getElementById('score');
+    const progressEl=document.getElementById('progressbar');
+    const barOk=document.getElementById('bar-ok');
+    const barWarn=document.getElementById('bar-warn');
+    const barFail=document.getElementById('bar-fail');
+    const listEl=document.getElementById('results');
+
+    const rows=[];const add=(l,s,f)=>rows.push({l,s,f});
+
+    // Features durchführen
+    for(const [label,test,fix] of FEATURES){add(label,test()?'ok':'warn',test()?null:fix);}  // warn statt fail: zugänglich für ältere Browser
+
+    // Versions‑Check
+    (function(){const {name,version}=parseUA();const os=parseOS();if(name==='Unbekannt'){add('Version‑Check nicht unterstützt','warn','Browser nicht erkannt.');return;}const latest=LATEST[name];if(!latest){add(`${name} nicht in Liste`,'warn','Manuell prüfen.');return;}const up=+version>=+latest;const link=UPDATE_LINKS[name]?` (<a href="${UPDATE_LINKS[name]}">${name} aktualisieren</a>)`:'';add(`${name} ${version} auf ${os}`,up?'ok':'warn',up?null:`Bitte auf ${latest}+ aktualisieren${link}`);} )();
+
+    // Renderer mit ARIA‑Updates
+    function render(){listEl.innerHTML='';let ok=0,warn=0,fail=0;for(const r of rows){const li=document.createElement('li');li.className='check';li.innerHTML=`<span class="icon ${r.s}" aria-hidden="true">${r.s==='ok'?'✔':r.s==='warn'?'⚠':'✖'}</span><div class="label">${r.l}</div>`;if(r.f){const d=document.createElement('div');d.className='sugg';d.innerHTML=`<ul><li>${r.f}</li></ul>`;li.appendChild(d);}listEl.appendChild(li);if(r.s==='ok')ok++;else if(r.s==='warn')warn++;else fail++;}
+      const total=ok+warn+fail,pct=total?Math.round(ok/total*100):0;
+      scoreEl.textContent=total?`Sicherheit: ${pct}% (${ok}/${total} OK)`:'Keine Prüfpunkte';
+      progressEl.setAttribute('aria-valuenow',pct);
+      barOk.style.width=`${ok/total*100}%`;barWarn.style.width=`${warn/total*100}%`;barFail.style.width=`${fail/total*100}%`;
+      barOk.setAttribute('aria-label',`${ok} OK`);barWarn.setAttribute('aria-label',`${warn} Warnungen`);barFail.setAttribute('aria-label',`${fail} Fehler`);
+    }
+
+    render();
+  </script>
+</body>
+</html>
